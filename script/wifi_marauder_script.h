@@ -135,6 +135,7 @@ typedef enum {
     WifiMarauderScriptStageTypeBeaconAp,
     WifiMarauderScriptStageTypeExec,
     WifiMarauderScriptStageTypeDelay,
+    WifiMarauderScriptStageTypeWepHandshake,
 } WifiMarauderScriptStageType;
 
 typedef enum {
@@ -223,6 +224,10 @@ typedef struct WifiMarauderScriptStageExec {
 typedef struct WifiMarauderScriptStageDelay {
     int timeout;
 } WifiMarauderScriptStageDelay;
+
+typedef struct WifiMarauderScriptStageWepHandshake {
+    uint32_t timeout;
+} WifiMarauderScriptStageWepHandshake;
 
 // Script
 typedef struct WifiMarauderScript {
