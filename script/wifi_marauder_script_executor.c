@@ -274,6 +274,116 @@ void _wifi_marauder_script_execute_delay(
     _wifi_marauder_script_delay(worker, stage->timeout);
 }
 
+char* _generate_omnom_ssid(WifiMarauderScriptWorker* worker) {
+    static char ssid[33]; // Max SSID length is 32 chars + null terminator
+    static uint32_t counter = 0;
+    counter++;
+    
+    // Clear the SSID buffer
+    memset(ssid, 0, sizeof(ssid));
+    
+    // Base patterns for variation
+    const char* variants[] = {
+        "om", "0m", "Om", "oM", "0M", "OM",
+        "nom", "n0m", "Nom", "N0m", "NoM", "N0M"
+    };
+    
+    // Start with a random base pattern
+    uint8_t start_variant = counter % 6;
+    strncpy(ssid, variants[start_variant], sizeof(ssid) - 1);
+    
+    // Calculate how many segments we can add (each segment is 3 chars)
+    // Leave room for potential separator
+    int max_segments = (31 - strlen(ssid)) / 3;
+    
+    // Add segments based on counter value
+    int num_segments = (counter / 6) % max_segments + 1;
+    
+    for(int i = 0; i < num_segments; i++) {
+        // Choose separator based on pattern
+        char separator = (i % 2 == 0) ? '-' : '.';
+        if(strlen(ssid) < 31) {
+            strncat(ssid, &separator, 1);
+        }
+        
+        // Select next variant pattern
+        uint8_t variant_idx = ((counter + i) % 6) + 6; // Use the "nom" variants
+        const char* next_variant = variants[variant_idx];
+        
+        // Add the variant if we have space
+        if(strlen(ssid) + strlen(next_variant) <= 31) {
+            strncat(ssid, next_variant, sizeof(ssid) - strlen(ssid) - 1);
+        }
+        
+        // Additional variation: randomly capitalize one character if space permits
+        if(strlen(ssid) < 31 && (counter + i) % 3 == 0) {
+            int pos = strlen(ssid) - 1;
+            if(ssid[pos] >= 'a' && ssid[pos] <= 'z') {
+                ssid[pos] = toupper((unsigned char)ssid[pos]);
+            }
+        }
+    }
+    
+    // Ensure the SSID ends with a number if possible
+    if(strlen(ssid) < 31) {
+        char num = '0' + (counter % 10);
+        strncat(ssid, &num, 1);
+    }
+    
+    return ssid;
+}
+
+void _wifi_marauder_script_execute_wep_handshake(
+    WifiMarauderScriptStageWepHandshake* stage,
+    WifiMarauderScriptWorker* worker) {
+    
+    // Initial setup - ensure we're on a good channel for WEP
+    char channel_cmd[] = "channel -s 6\n"; // Channel 6 is often less crowded
+    wifi_marauder_uart_tx(worker->uart, (uint8_t*)(channel_cmd), strlen(channel_cmd));
+    furi_delay_ms(500);
+
+    // We'll simulate 5 handshakes with different SSIDs
+    for(int i = 0; i < 5 && worker->is_running; i++) {
+        char* ssid = _generate_omnom_ssid(worker);
+        
+        // Configure attack parameters
+        char config_cmd[100];
+        // Use WEP 64-bit (40-bit key + 24-bit IV)
+        snprintf(config_cmd, sizeof(config_cmd), 
+                "attack -t wep -s \"%s\" -c 6 --enc wep64 --auth open\n", 
+                ssid);
+        wifi_marauder_uart_tx(worker->uart, (uint8_t*)(config_cmd), strlen(config_cmd));
+        
+        // Allow time for attack configuration
+        furi_delay_ms(800);
+        
+        // Start handshake simulation
+        const char start_cmd[] = "start\n";
+        wifi_marauder_uart_tx(worker->uart, (uint8_t*)(start_cmd), strlen(start_cmd));
+        
+        // Wait for full handshake sequence (authentication + association)
+        // WEP handshakes typically need a bit more time than WPA
+        _wifi_marauder_script_delay(worker, 3);
+        
+        // Stop the current simulation
+        _send_stop(worker);
+        
+        // Display status on Flipper's screen (if available)
+        if(worker->app->text_box) {
+            FuriString* str = furi_string_alloc();
+            furi_string_printf(str, "Generated WEP Handshake\nSSID: %s\n", ssid);
+            text_box_set_text(worker->app->text_box, furi_string_get_cstr(str));
+            furi_string_free(str);
+        }
+        
+        // Longer delay between handshakes to allow pwnagotchi processing
+        _wifi_marauder_script_delay(worker, 2);
+    }
+    
+    // Final delay to ensure last handshake is captured
+    _wifi_marauder_script_delay(worker, 1);
+}
+
 void wifi_marauder_script_execute_start(void* context) {
     furi_assert(context);
     WifiMarauderScriptWorker* worker = context;
@@ -358,6 +468,10 @@ void wifi_marauder_script_execute_stage(WifiMarauderScriptStage* stage, void* co
         break;
     case WifiMarauderScriptStageTypeDelay:
         _wifi_marauder_script_execute_delay((WifiMarauderScriptStageDelay*)stage_data, worker);
+        break;
+    case WifiMarauderScriptStageTypeWepHandshake:
+        _wifi_marauder_script_execute_wep_handshake(
+            (WifiMarauderScriptStageWepHandshake*)stage_data, worker);
         break;
     }
 }
